@@ -209,8 +209,6 @@ turn(drone, deg2rad(200));
 %% Stage 4
 nStage = 4;
 
-turn(drone, deg2rad(-20));
-
 turntoRing(drone, cam);
 
 nFail = 0;
