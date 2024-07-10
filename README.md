@@ -16,7 +16,7 @@ II. 요구사항
 
 III. 경로 설명
 ===============
-![Alt text]("./Users/zkxm0/Desktop/image.png")
+![image](https://github.com/yousukyoung/2024-Mini-Drone-Autonomous-Flight-Contest/assets/108873470/9a2d7f8b-1635-4537-9f92-bdbadc7569fe)
 1. 출발점 (START)에서 이륙하여 첫 번째 지점(4.1m)으로 수직 이동.
 2. 첫 번째 지점에서 두 번째 지점(6.1m)으로 이동.
 3. 두 번째 지점에서 세 번째 지점(3.8m)으로 이동.
