@@ -114,9 +114,456 @@ V. 알고리즘 흐름도
 
 VI. 소스 코드 설명
 ==================
+메인 스크립트는 4단계 stage를 통해 드론이 링을 찾고, 링의 중심을 맞추고, 사각형을 찾고, 사각형의 중심을 맞추며 진행합니다. 각 stage 드론이 특정 행동을 수행하는 시퀀스를 가지고 있습니다.
 
+### Pix2Meter(imRad)
+반지름을 통해 픽셀 거리 비율을 계산합니다.
+```matlab
+function ratio = Pix2Meter(imRad)
+    switch nStage
+        case 1
+            realRad = 0.57 / 2;
+        case 2
+            realRad = 0.46 / 2;
+        case 3 
+            realRad = 0.46 / 2;
+        case 4
+            realRad = 0.52 / 2;
+    end
+    ratio = realRad / imRad;
+end
+```
 
+### Pix2Meter2(pixel)
+한 변의 길이를 통해 픽셀 거리 비율을 계산합니다.
+```matlab
+function ratio = Pix2Meter2(pixel)
+    ratio = 0.09 / pixel;
+end
+```
 
+### movetoLocation(drone, x, y, d)
+드론을 특정 거리만큼 움직입니다.
+```matlab
+function movetoLocation(drone, x, y, d)
+   if abs(x) < 0.2 && abs(y) < 0.2 && abs(d) < 0.2
+       disp({d, x, -y});
+       disp('Do not move')
+       land(drone);
+   else
+      disp({d, x, -y});
+      move(drone, [d, x, y], 'Speed', 1)
+   end
+end
+```
 
+### movetoforward(drone, cam)
+사각형과의 거리를 측정하고, 이동 거리를 설정하여 드론을 전진시킵니다.
+```matlab
+function movetoforward(drone, cam)
+    [rectangleCenter, rectangleHeight, is_rectangle] = find_rectangle(cam, 'red');
+    focal_length = 925.0;
+    actual_distance = (0.09 * focal_length) / rectangleHeight;
+    fprintf('사각형의 중심으로부터의 실제 거리: %.5f m\n', actual_distance);
+    switch nStage
+        case 1
+            target_distance = 0.5;
+        case 2
+            target_distance = 1.5;
+        case 3
+            target_distance = 1.75;
+        case 4
+            target_distance = 0.75;
+        otherwise
+            error('지원되지 않는 stage입니다.');    
+    end
+   if abs(actual_distance - target_distance) >= 0.2
+       distance = actual_distance - target_distance;
+       fprintf('%.5f m 만큼 전진합니다.', distance);
+       movetoLocation(drone, 0, 0, distance);
+   end
+end
+```
 
+### turntoRing(drone, cam)
+링을 찾기 위해 드론을 회전시킵니다.
+```matlab
+function turntoRing(drone, cam)
+    mindist = 3000;
+    switch nStage
+        case 3
+            step = 7;
+        otherwise 
+            step = 5;
+    end
+    for level = 1:step
+        if level > 1
+            turn(drone, deg2rad(5));
+        end
+        while true
+            [holeCenter, holeRad, is_ring] = find_hole_center(drone, cam);
+            if is_ring
+                break;
+            end
+        end
+        imageCenter = [960/2, 720/2];
+        distanceToCenter = norm(holeCenter - imageCenter);
+        disp(['Level: ' num2str(level) ', Distance to Center: ' num2str(distanceToCenter)]);
+        if distanceToCenter <= mindist
+            mindist = distanceToCenter;
+            minlevel = level;
+        end
+    end
+    angle = (-1)*5*(step - minlevel);
+    disp(['최적 각도 : ', num2str(angle), '. 회전합니다.']);
+    pause;
+    turn(drone, deg2rad(angle));
+end
+```
+### move_ring_centered(drone, cam, ringCenter, ringRad)
+링 중심을 맞추기 위한 함수입니다.
+```matlab
+function isCentered = move_ring_centered(drone, cam, ringCenter, ringRad)
+    switch lower(nStage)
+        case 1
+            xOffset = 0.0;
+            yOffset = 0.3;
+            divide_Offset = 1;
+            forward_dist = 3;
+        case 2
+            xOffset = -0.3;
+            yOffset = 0.3;
+            divide_Offset = 2;
+            forward_dist = 3;
+        case 3
+            xOffset = -0.3;
+            yOffset = 0.3;
+            divide_Offset = 2;
+            forward_dist = 2;
+        case 4
+            xOffset = 0.0;
+            yOffset = 0.5;
+            divide_Offset = 1;
+            forward_dist = 3.5;
+        otherwise
+    end
+    image = snapshot(cam);
+    [rows, cols, ~] = size(image);
+    imageCenter = [cols / 2, rows / 2];
+    distanceToCenter = norm(ringCenter - imageCenter);
+    distanceThreshold = min(cols, rows) * 0.12;
+    isCentered = distanceToCenter <= distanceThreshold;
+    disp(isCentered);
+    if ~isCentered
+        distance = ringCenter - imageCenter;
+        ratio = Pix2Meter(ringRad);
+        distance = ratio * distance;
+        distance = distance / divide_Offset;
+        distance(1) = distance(1) + xOffset;
+        distance(2) = distance(2) + yOffset;
+       if abs(distance(1)) < 0.2 && abs(distance(2)) < 0.2
+           isCentered = true;
+           disp('중심과 가깝습니다. 링 내에 사각형이 존재하는지 확인합니다.');
+           is_rectangle = find_rectangle_in_ring(cam, ringCenter, ringRad);
+           if is_rectangle
+               disp('링 내에 사각형이 존재합니다.')
+           else 
+               disp('링 내에 사각형이 존재하지 않습니다.')
+           end
+           disp('중심과 가깝습니다. 전진합니다.');
+           moveforward(drone, 'Distance', forward_dist, 'Speed', 1);
+       else 
+           disp('중심이 아닙니다. 중심으로 위치합니다.')
+           movetoLocation(drone, distance(1), distance(2), 0);
+       end
+    else
+        disp('중심입니다. 링 내에 사각형이 존재하는지 확인합니다.')
+        is_rectangle = find_rectangle_in_ring(cam, holeCenter, holeRad);
+        if is_rectangle
+           disp('링 내에 사각형이 존재합니다.')
+        else 
+           disp('링 내에 사각형이 존재하지 않습니다.')
+        end
+        disp('중심입니다. 전진합니다.')
+        moveforward(drone, 'Distance', forward_dist, 'Speed', 1);
+    end
+end
+```
 
+### find_hole_center(drone, cam)
+링을 찾기 위한 함수입니다.
+```matlab
+function [holeCenter, holeRad, is_ring] = find_hole_center(drone, cam)
+    image = snapshot(cam);
+    hsvImage = rgb2hsv(image);
+    blueThreshLow = [0.5, 0.4, 0.2];
+    blueThreshHigh = [0.7, 1.0, 1.0];
+    blueMask = (hsvImage(:,:,1) >= blueThreshLow(1)) & (hsvImage(:,:,1) <= blueThreshHigh(1)) & ...
+               (hsvImage(:,:,2) >= blueThreshLow(2)) & (hsvImage(:,:,2) <= blueThreshHigh(2)) & ...
+               (hsvImage(:,:,3) >= blueThreshLow(3)) & (hsvImage(:,:,3) <= blueThreshHigh(3));
+    blueMask = imopen(blueMask, strel('disk', 5));
+    blueMask = imclose(blueMask, strel('disk', 15));
+    invertedMask = ~blueMask;
+    invertedMask = imerode(invertedMask, strel('disk', 5));
+    invertedMask = imdilate(invertedMask, strel('disk', 5));
+    [centers, radii, metric] = imfindcircles(invertedMask, [40 1000], 'ObjectPolarity', 'bright', 'Sensitivity', 0.92);
+    if ~isempty(centers)
+        is_ring = true;
+        [~, idx] = max(radii .* metric);
+        holeCenter = centers(idx, :);
+        holeRad = radii(idx);
+        disp('링을 찾았습니다.')
+    else
+        is_ring = false;
+        holeCenter = [NaN, NaN];
+        holeRad = NaN;
+        warning('파란 천막에 뚫린 원이 감지되지 않았습니다.');
+        d = 0;
+        x = 0;
+        y = 0;
+        bluePixelCount = sum(blueMask(:));
+        totalPixels = numel(blueMask);
+        blueRatio = bluePixelCount / totalPixels;
+        disp(['파란색 영역의 비율: ', num2str(blueRatio * 100), '%']);
+        if (blueRatio >= 50 || blueRatio == 0)
+            d = -0.2;
+        else 
+            [y_coords, x_coords] = find(blueMask);
+            imageSize = size(blueMask);
+            imageWidth = imageSize(2);
+            imageHeight = imageSize(1);
+            if ~isempty(x_coords) && !isempty(y_coords)
+                blue_center_x = mean(x_coords);
+                blue_center_y = mean(y_coords);
+                if (blue_center_y >= imageHeight*2/5) && (blue_center_y <= imageHeight*3/5) && (blue_center_x >= imageWidth*2/5) && (blue_center_x <= imageWidth*3/5)
+                    fprintf('너무 근접합니다. 뒤로 물러섭니다.')
+                    d = -0.2;
+                end
+                if blue_center_y < imageHeight*2/5
+                    fprintf('파란색 영역이 상단에 있습니다.\n');
+                    y = -0.2;
+                elseif blue_center_y > imageHeight*3/5
+                    fprintf('파란색 영역이 하단에 있습니다.\n');
+                    y = 0.2;
+                end
+                if blue_center_x < imageWidth*2/5
+                    fprintf('파란색 영역이 좌측에 있습니다.\n');
+                    x = -0.3;
+                elseif blue_center_x > imageWidth*3/5
+                    fprintf('파란색 영역이 우측에 있습니다.\n');
+                    x = 0.3;
+                end
+            end
+        end
+        disp('링을 감지하지 못하여, 이동합니다.')
+        movetoLocation(drone, x, y, d)
+    end
+    imshow(image);
+    hold on;
+    if !isnan(holeCenter(1))
+        viscircles(holeCenter, radii(idx), 'EdgeColor', 'b');
+        plot(holeCenter(1), holeCenter(2), 'bo', 'MarkerSize', 10, 'LineWidth', 2);
+    end
+end
+```
+
+### find_rectangle_in_ring(cam, ringCenter, ringRad)
+링 내에서 사각형을 찾는 함수입니다.
+```matlab
+function is_rectangle = find_rectangle_in_ring(cam, ringCenter, ringRad)
+    is_rectangle = false;
+    image = snapshot(cam);
+    hsvImage = rgb2hsv(image);
+    switch nStage
+        case 1
+            colorThreshLow1 = [0, 0.4, 0.2];
+            colorThreshHigh1 = [0.1, 1.0, 1.0];
+            colorThreshLow2 = [0.9, 0.4, 0.2];
+            colorThreshHigh2 = [1.0, 1.0, 1.0];
+        case 2
+            colorThreshLow1 = [0.3, 0.4, 0.2];
+            colorThreshHigh1 = [0.5, 1.0, 1.0];
+            colorThreshLow2 = [];
+            colorThreshHigh2 = [];
+        case 3
+            colorThreshLow1 = [0.7, 0.4, 0.2];
+            colorThreshHigh1 = [0.9, 1.0, 1.0];
+            colorThreshLow2 = [];
+            colorThreshHigh2 = [];
+        case 4
+            colorThreshLow1 = [0, 0.4, 0.2];
+            colorThreshHigh1 = [0.1, 1.0, 1.0];
+            colorThreshLow2 = [0.9, 0.4, 0.2];
+            colorThreshHigh2 = [1.0, 1.0, 1.0];
+        otherwise
+            error('지원되지 않는 색깔입니다.');
+    end
+    colorMask1 = (hsvImage(:,:,1) >= colorThreshLow1(1)) & (hsvImage(:,:,1) <= colorThreshHigh1(1)) & ...
+                (hsvImage(:,:,2) >= colorThreshLow1(2)) & (hsvImage(:,:,2) <= colorThreshHigh1(2)) & ...
+                (hsvImage(:,:,3) >= colorThreshLow1(3)) & (hsvImage(:,:,3) <= colorThreshHigh1(3));
+    if ~isempty(colorThreshLow2) && ~isempty(colorThreshHigh2)
+        colorMask2 = (hsvImage(:,:,1) >= colorThreshLow2(1)) & (hsvImage(:,:,1) <= colorThreshHigh2(1)) & ...
+                    (hsvImage(:,:,2) >= colorThreshLow2(2)) & (hsvImage(:,:,2) <= colorThreshHigh2(2)) & ...
+                    (hsvImage(:,:,3) >= colorThreshLow2(3)) & (hsvImage(:,:,3) <= colorThreshHigh2(3));
+        colorMask = colorMask1 | colorMask2;
+    else
+        colorMask = colorMask1;
+    end
+    colorMask = imopen(colorMask, strel('disk', 5));
+    colorMask = imclose(colorMask, strel('disk', 15));
+    rectangleCoords = [];
+    rectangleCenter = [];
+    [rows, cols, ~] = size(image);
+    [X, Y] = meshgrid(1:cols, 1:rows);
+    ringMask = sqrt((X - ringCenter(1)).^2 + (Y - ringCenter(2)).^2) <= ringRad;
+    stats = regionprops(colorMask & ringMask, 'BoundingBox', 'Centroid');
+    numRectangles = numel(stats);
+    if numRectangles > 0
+        is_rectangle = true;
+        maxArea = 0;
+        for i = 1:numRectangles
+            area = stats(i).BoundingBox(3) * stats(i).BoundingBox(4);
+            if area > maxArea
+                maxArea = area;
+                rectangleCoords = stats(i).BoundingBox;
+                rectangleCenter = stats(i).Centroid;
+            end
+        end
+    else
+        is_rectangle = false;
+        warning('링 내에서 원하는 색깔의 사각형을 찾지 못했습니다.');
+    end
+    if ~isempty(rectangleCoords)
+        figure;
+        imshow(image);
+        hold on;
+        rectangle('Position', rectangleCoords, 'EdgeColor', 'r', 'LineWidth', 2);
+        plot(rectangleCenter(1), rectangleCenter(2), 'ro', 'MarkerSize', 10, 'LineWidth', 2);
+        title(['Stage ', num2str(nStage), '에서 찾은 사각형']);
+        hold off;
+    end
+end
+```
+
+### move_rectangle_centered(drone, cam, rectangleCenter, rectangleHeight)
+사각형 중심을 맞추기 위한 함수입니다.
+```matlab
+function isCentered = move_rectangle_centered(drone, cam, rectangleCenter, rectangleHeight)
+    image = snapshot(cam);
+    [rows, cols, ~] = size(image);
+    imageCenter = [cols / 2, rows / 2];
+    distanceToCenter = norm(rectangleCenter - imageCenter);
+    distanceThreshold = min(cols, rows) * 0.05;
+    isCentered = distanceToCenter <= distanceThreshold;
+    disp(isCentered);
+    if ~isCentered
+        distance = rectangleCenter - imageCenter;
+        ratio = Pix2Meter2(rectangleHeight);
+        distance = ratio * distance;
+       if abs(distance(1)) < 0.2 && abs(distance(2) + 0.3) < 0.2
+           isCentered = true;
+           disp('중심과 가깝습니다. 거리를 계산합니다.');
+           movetoforward(drone, cam)
+       else 
+           disp('중심이 아닙니다. 중심으로 위치합니다.')
+           movetoLocation(drone, distance(1), distance(2) + 0.3, 0);
+       end
+    else
+        disp('중심입니다. 거리를 계산합니다.')
+        movetoforward(drone, cam)
+    end
+end
+```
+
+### is_rectangle_centered_in_ring(ringCenter, ringRad, rectangleCenter)
+사각형이 링 중심에 위치하는지 확인합니다.
+```matlab
+function isCentered = is_rectangle_centered_in_ring(ringCenter, ringRad, rectangleCenter)
+    smallRad = ringRad * 0.5;
+    isCentered = norm(ringCenter - rectangleCenter) <= smallRad;
+    if isCentered
+        disp('사각형이 중심에 존재합니다.')
+    else
+        disp('사각형이 중심에 있지 않습니다.')
+    end
+end
+```
+
+### find_rectangle(cam)
+사각형을 찾는 함수입니다.
+```matlab
+function [rectangleCenter, rectangleHeight, is_rectangle] = find_rectangle(cam)
+    image = snapshot(cam);
+    hsvImage = rgb2hsv(image);
+    switch lower(nStage)
+        case 1
+            colorThreshLow1 = [0, 0.4, 0.2];
+            colorThreshHigh1 = [0.1, 1.0, 1.0];
+            colorThreshLow2 = [0.9, 0.4, 0.2];
+            colorThreshHigh2 = [1.0, 1.0, 1.0];
+        case 2
+            colorThreshLow1 = [0.3, 0.4, 0.2];
+            colorThreshHigh1 = [0.5, 1.0, 1.0];
+            colorThreshLow2 = [];
+            colorThreshHigh2 = [];
+        case 3
+            colorThreshLow1 = [0.7, 0.4, 0.2];
+            colorThreshHigh1 = [0.9, 1.0, 1.0];
+            colorThreshLow2 = [];
+            colorThreshHigh2 = [];
+        case 4
+            colorThreshLow1 = [0, 0.4, 0.2];
+            colorThreshHigh1 = [0.1, 1.0, 1.0];
+            colorThreshLow2 = [0.9, 0.4, 0.2];
+            colorThreshHigh2 = [1.0, 1.0, 1.0];
+        otherwise
+            error('지원되지 않는 색깔입니다.');
+    end
+    colorMask1 = (hsvImage(:,:,1) >= colorThreshLow1(1)) & (hsvImage(:,:,1) <= colorThreshHigh1(1)) & ...
+                (hsvImage(:,:,2) >= colorThreshLow1(2)) & (hsvImage(:,:,2) <= colorThreshHigh1(2)) & ...
+                (hsvImage(:,:,3) >= colorThreshLow1(3)) & (hsvImage(:,:,3) <= colorThreshHigh1(3));
+    if ~isempty(colorThreshLow2) && ~isempty(colorThreshHigh2)
+        colorMask2 = (hsvImage(:,:,1) >= colorThreshLow2(1)) & (hsvImage(:,:,1) <= colorThreshHigh2(1)) & ...
+                    (hsvImage(:,:,2) >= colorThreshLow2(2)) & (hsvImage(:,:,2) <= colorThreshHigh2(2)) & ...
+                    (hsvImage(:,:,3) >= colorThreshLow2(3)) & (hsvImage(:,:,3) <= colorThreshHigh2(3));
+        colorMask = colorMask1 | colorMask2;
+    else
+        colorMask = colorMask1;
+    end
+    colorMask = imopen(colorMask, strel('disk', 5));
+    colorMask = imclose(colorMask, strel('disk', 15));
+    imshow(colorMask)
+    rectangleCoords = [];
+    rectangleCenter = [];
+    rectangleSize = [];
+    stats = regionprops(colorMask, 'BoundingBox', 'Centroid');
+    numRectangles = numel(stats);
+    if numRectangles > 0
+        maxArea = 0;
+        for i = 1:numRectangles
+            area = stats(i).BoundingBox(3) * stats(i).BoundingBox(4);
+            if area > maxArea
+                maxArea = area;
+                rectangleCoords = stats(i).BoundingBox;
+                rectangleCenter = stats(i).Centroid;
+                rectangleSize = [stats(i).BoundingBox(3), stats(i).BoundingBox(4)];
+                rectangleHeight = mean(rectangleSize);
+            end
+        end
+    else
+        warning('사각형이 이미지에서 찾지 못했습니다.');
+    end
+    if ~isempty(rectangleCoords)
+        is_rectangle = true;
+        figure;
+        imshow(image);
+        hold on;
+        rectangle('Position', rectangleCoords, 'EdgeColor', 'r', 'LineWidth', 2);
+        plot(rectangleCenter(1), rectangleCenter(2), 'ro', 'MarkerSize', 10, 'LineWidth', 2);
+        title(['Stage ', num2str(nStage), '에서 찾은 사각형']);
+        hold off;
+    else
+        is_rectangle = false;
+    end
+end
+```
