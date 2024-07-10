@@ -1,3 +1,5 @@
+%% 은수 좋은날
+
 clear;
 
 drone = ryze();
