@@ -420,7 +420,7 @@ function isCentered = move_ring_centered(drone, cam, ringCenter, ringRad)
             xOffset = 0.0;
             yOffset = 0.3;
             divide_Offset = 2.0;
-            forward_dist = 3.0;
+            forward_dist = 4.0;
 
         case 3
             xOffset = 0.0;
