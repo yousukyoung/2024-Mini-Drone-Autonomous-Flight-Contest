@@ -10,7 +10,7 @@ I. 소개
 
 II. 요구사항
 =============
-# MATLAB 및 Ryze Tello 지원 패키지 설치
+1단계 MATLAB 및 Ryze Tello 지원 패키지 설치
 ## Tello 드론
 ### 드론이 안전하게 작동할 수 있는 환경
 
