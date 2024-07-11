@@ -764,7 +764,7 @@ function isCentered = move_rectangle_centered(drone, cam, rectangleCenter, recta
         distanceToCenter = norm(rectangleCenter - imageCenter);
     
         % 거리 임계값 설정 (예: 이미지 너비 또는 높이의 20% 이내로 설정)
-        distanceThreshold = min(cols, rows) * 0.03;
+        distanceThreshold = min(cols, rows) * 0.05;
     
         % 링 중심점이 이미지 중심 영역에 포함되는지 여부 판별
         isCentered = distanceToCenter <= distanceThreshold;
