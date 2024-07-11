@@ -411,7 +411,7 @@ function isCentered = move_ring_centered(drone, cam, ringCenter, ringRad)
     switch nStage
         case 1
             xOffset = 0.0;
-            yOffset = 0.4;
+            yOffset = 0.5;
             divide_Offset = 1.0;
             forward_dist = 3.0;
 
